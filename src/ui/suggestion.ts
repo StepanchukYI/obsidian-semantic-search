@@ -75,7 +75,7 @@ export class Suggestion {
           const indices: SearchMatchPart[] = [];
           for (let match of matches) {
             const match_indices = match.indices.slice();
-            indices.concat(match_indices)
+            indices.push(...match_indices)
           }
           this.match = {
             score: bestMatch.score,

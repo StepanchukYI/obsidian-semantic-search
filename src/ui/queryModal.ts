@@ -37,7 +37,9 @@ export class QueryModal extends Modal {
 
       const button = inputContainer.createEl("button", {text: "Submit", cls: "ss-query-submit-button"});
       const resultsDiv = contentEl.createDiv({cls: "prompt-results"});
-      button.onclick = async () => {
+
+      // Function to handle query submission
+      const submitQuery = async () => {
         resultsDiv.replaceChildren();
         setIcon(resultsDiv, "loader");
         const suggestions: Suggestion[] = await this.getSuggestions(input.value);
@@ -45,7 +47,18 @@ export class QueryModal extends Modal {
         suggestions.forEach(suggestion => {
           this.renderSuggestion(suggestion, resultsDiv);
         })
-      }
+      };
+
+      // Add click handler for button
+      button.onclick = submitQuery;
+
+      // Add Enter key support
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          submitQuery();
+        }
+      });
   }
 
   update_query_cost_estimate(e: Event, estimate_text: HTMLElement) {
@@ -68,23 +81,48 @@ export class QueryModal extends Modal {
 
   // Returns all available suggestions.
   async getSuggestions(query: string): Promise<Suggestion[]> {
+    console.log("Getting suggestions for query:", query);
     const wasmSuggestions: WASMSuggestion[] = await plugin.get_suggestions(this.app, this.settings, query);
+    console.log("WASM suggestions received:", wasmSuggestions);
+
     const suggestions: Suggestion[] = wasmSuggestions.map(wasmSuggestion => new Suggestion(this.app, wasmSuggestion, this.settings.sectionDelimeterRegex));
 
-    suggestions.forEach(async suggestion => {
+    // Wait for all suggestions to load their file and heading data
+    await Promise.all(suggestions.map(async suggestion => {
       await suggestion.addSuggestionFile().addSuggestionHeading();
-    })
+      console.log("Suggestion loaded:", { name: suggestion.name, header: suggestion.header, file: suggestion.file?.path, match: suggestion.match });
+    }));
 
+    console.log("All suggestions loaded:", suggestions);
     return suggestions;
   }
 
   // Renders each suggestion item.
   renderSuggestion(suggestion: Suggestion, el: HTMLElement) {
-    const resultContainer = el.createDiv({cls: ["suggestion-item", "mod-complex", "ss-suggestion-item"]})
+    console.log("Rendering suggestion:", suggestion);
+    const resultContainer = el.createDiv({cls: ["suggestion-item", "ss-suggestion-item"]})
     resultContainer.onclick = async () => await this.onChooseSuggestion(suggestion);
-    if (suggestion.match && suggestion.file) {
-      const div = this.renderContent(resultContainer, suggestion.header, suggestion.match);
-      this.renderPath(div, suggestion.file, suggestion.match);
+
+    // Simple, clean display
+    if (suggestion.file) {
+      // File name (clean, no extra suffixes)
+      const fileName = suggestion.file.name.replace('.md', '');
+      const fileNameEl = resultContainer.createDiv({cls: "suggestion-filename"});
+      fileNameEl.setText(fileName);
+
+      // Header content (if available)
+      if (suggestion.header && suggestion.header.trim()) {
+        const headerEl = resultContainer.createDiv({cls: "suggestion-header"});
+        headerEl.setText(suggestion.header);
+      }
+
+      // File path (clean)
+      const pathEl = resultContainer.createDiv({cls: "suggestion-path"});
+      const path = this.getPathDisplayText(suggestion.file);
+      pathEl.setText(path);
+    } else {
+      // Fallback for missing file
+      resultContainer.createDiv({ text: suggestion.name, cls: "suggestion-fallback" });
     }
   }
 
@@ -146,6 +184,8 @@ export class QueryModal extends Modal {
 
   // Perform action on the selected suggestion.
   async onChooseSuggestion(suggestion: Suggestion) {
+    console.log("Choosing suggestion:", suggestion);
+    console.log("Suggestion position data:", suggestion.pos);
     this.close();
     const isMatch = (candidateLeaf: WorkspaceLeaf) => {
       let val = false;
@@ -160,15 +200,20 @@ export class QueryModal extends Modal {
     this.app.workspace.iterateAllLeaves(leaf => leaves.push(leaf));
     const matchingLeaf = leaves.find(isMatch);
 
-    const eState = {
+    // Only set cursor position if we have valid position data
+    const eState: any = {
       active: true,
       focus: true,
-      startLoc: suggestion.pos?.start,
-      endLoc: suggestion.pos?.end,
-      cursor: {
-        from: {line: suggestion.pos?.start.line, ch: suggestion.pos?.start.col },
-        to: {line: suggestion.pos?.start.line, ch: suggestion.pos?.start.col },
-      }
+    };
+
+    // Add position data only if it exists and is valid
+    if (suggestion.pos?.start && suggestion.pos?.end) {
+      eState.startLoc = suggestion.pos.start;
+      eState.endLoc = suggestion.pos.end;
+      eState.cursor = {
+        from: {line: suggestion.pos.start.line, ch: suggestion.pos.start.col },
+        to: {line: suggestion.pos.start.line, ch: suggestion.pos.start.col },
+      };
     }
 
     if (matchingLeaf === undefined) {
