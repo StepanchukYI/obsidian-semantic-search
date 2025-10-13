@@ -1,4 +1,4 @@
-import { App, Loc, Pos, SearchMatchPart, SearchResult, TFile } from "obsidian";
+import { App, Loc, Pos, SearchMatchPart, SearchResult, TFile, normalizePath } from "obsidian";
 import Fuse from 'fuse.js';
 
 export type WASMSuggestion = {
@@ -87,6 +87,46 @@ export class Suggestion {
       }
     }
   }
+
+  renderIntoHTML(resultContainer: HTMLElement) {
+    // Simple, clean display
+    if (this.file) {
+      // Header content (if available)
+      const headerEl = resultContainer.createDiv({cls: "ss-suggestion-header"});
+      if (this.header && this.header.trim()) {
+        headerEl.setText(this.header);
+      } else {
+        const fileName = this.file.name.replace('.md', '');
+        headerEl.setText(fileName);
+      }
+
+      // File path (clean)
+      const pathEl = resultContainer.createDiv({cls: "ss-suggestion-path"});
+      const path = this.getPathDisplayText(this.file);
+      pathEl.setText(path);
+    } else {
+      // Fallback for missing file
+      resultContainer.createDiv({ text: this.name, cls: "ss-suggestion-fallback" });
+      const pathEl = resultContainer.createDiv({cls: "ss-suggestion-path"});
+      pathEl.setText("File not found");
+    }
+  }
+
+  getPathDisplayText(
+    file: TFile,
+  ): string {
+    let text = '';
+
+    if (file) {
+      const { parent } = file;
+      const dirname = parent.name;
+      const isRoot = parent.isRoot();
+      text = isRoot ? `${file.name}` : normalizePath(`${dirname}/${file.name}`);
+    }
+
+    return text;
+  }
+
 }
 
 function getLocFromIndex(

@@ -77,68 +77,8 @@ export class LinkSuggest extends EditorSuggest<Suggestion> {
     }
 
     renderSuggestion(suggestion: Suggestion, el: HTMLElement): void {
-      console.log(suggestion);
       const resultContainer = el.createDiv({cls: ["suggestion-item", "mod-complex" ]})
-      if (suggestion.match && suggestion.file) {
-        const div = this.renderContent(resultContainer, suggestion.header, suggestion.match);
-        this.renderPath(div, suggestion.file, suggestion.match);
-      }
-    }
-
-    renderContent(
-      parentEl: HTMLElement,
-      content: string,
-      match: SearchResult,
-      offset?: number,
-    ): HTMLDivElement {
-      const contentEl = parentEl.createDiv({
-        cls: 'suggestion-content',
-      });
-
-      const titleEl = contentEl.createDiv({
-        cls: 'suggestion-title',
-      });
-
-      renderResults(titleEl, content, match, offset);
-
-      return contentEl;
-    }
-
-    renderPath(
-      parentEl: HTMLElement,
-      file: TFile,
-      match: SearchResult,
-    ): void {
-      if (parentEl && file) {
-        const isRoot = file.parent.isRoot();
-        let hidePath = isRoot;
-
-        if (!hidePath) {
-          const wrapperEl = parentEl.createDiv({ cls: 'suggestion-note' });
-          const path = this.getPathDisplayText(file);
-
-          const iconEl = wrapperEl.createSpan();
-          setIcon(iconEl, 'folder');
-
-          const pathEl = wrapperEl.createSpan();
-          renderResults(pathEl, path, match);
-        }
-      }
-    }
-
-    getPathDisplayText(
-      file: TFile,
-    ): string {
-      let text = '';
-
-      if (file) {
-        const { parent } = file;
-        const dirname = parent.name;
-        const isRoot = parent.isRoot();
-        text = isRoot ? `${file.name}` : normalizePath(`${dirname}/${file.name}`);
-      }
-
-      return text;
+	  suggestion.renderIntoHTML(resultContainer);
     }
 
     selectSuggestion(suggestion: Suggestion, evt: MouseEvent | KeyboardEvent): void {

@@ -82,6 +82,8 @@ export class QueryModal extends Modal {
   // Returns all available suggestions.
   async getSuggestions(query: string): Promise<Suggestion[]> {
     const wasmSuggestions: WASMSuggestion[] = await plugin.get_suggestions(this.app, this.settings, query);
+    console.debug("WASM suggestions received:", wasmSuggestions);
+
     const suggestions: Suggestion[] = wasmSuggestions.map(wasmSuggestion => new Suggestion(this.app, wasmSuggestion, this.settings.sectionDelimeterRegex));
 
     // Wait for all suggestions to load their file and heading data
@@ -96,84 +98,7 @@ export class QueryModal extends Modal {
   renderSuggestion(suggestion: Suggestion, el: HTMLElement) {
     const resultContainer = el.createDiv({cls: ["suggestion-item", "ss-suggestion-item"]})
     resultContainer.onclick = async () => await this.onChooseSuggestion(suggestion);
-
-    // Simple, clean display
-    if (suggestion.file) {
-      // File name (clean, no extra suffixes)
-      const fileName = suggestion.file.name.replace('.md', '');
-      const fileNameEl = resultContainer.createDiv({cls: "suggestion-filename"});
-      fileNameEl.setText(fileName);
-
-      // Header content (if available)
-      if (suggestion.header && suggestion.header.trim()) {
-        const headerEl = resultContainer.createDiv({cls: "suggestion-header"});
-        headerEl.setText(suggestion.header);
-      }
-
-      // File path (clean)
-      const pathEl = resultContainer.createDiv({cls: "suggestion-path"});
-      const path = this.getPathDisplayText(suggestion.file);
-      pathEl.setText(path);
-    } else {
-      // Fallback for missing file
-      resultContainer.createDiv({ text: suggestion.name, cls: "suggestion-fallback" });
-    }
-  }
-
-  renderContent(
-    parentEl: HTMLElement,
-    content: string,
-    match: SearchResult,
-    offset?: number,
-  ): HTMLDivElement {
-    const contentEl = parentEl.createDiv({
-      cls: 'suggestion-content',
-    });
-
-    const titleEl = contentEl.createDiv({
-      cls: 'suggestion-title',
-    });
-
-    renderResults(titleEl, content, match, offset);
-
-    return contentEl;
-  }
-
-  renderPath(
-    parentEl: HTMLElement,
-    file: TFile,
-    match: SearchResult,
-  ): void {
-    if (parentEl && file) {
-      const isRoot = file.parent.isRoot();
-      let hidePath = isRoot;
-
-      if (!hidePath) {
-        const wrapperEl = parentEl.createDiv({ cls: 'suggestion-note' });
-        const path = this.getPathDisplayText(file);
-
-        const iconEl = wrapperEl.createSpan();
-        setIcon(iconEl, 'folder');
-
-        const pathEl = wrapperEl.createSpan();
-        renderResults(pathEl, path, match);
-      }
-    }
-  }
-
-  getPathDisplayText(
-    file: TFile,
-  ): string {
-    let text = '';
-
-    if (file) {
-      const { parent } = file;
-      const dirname = parent.name;
-      const isRoot = parent.isRoot();
-      text = isRoot ? `${file.name}` : normalizePath(`${dirname}/${file.name}`);
-    }
-
-    return text;
+	suggestion.renderIntoHTML(resultContainer);
   }
 
   // Perform action on the selected suggestion.
