@@ -1,10 +1,10 @@
 {
-  "id": "bbawj-semantic-search",
+  "id": "obsidian-semantic-search",
   "name": "Semantic Search",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "minAppVersion": "1.0.0",
-  "description": "Semantic search for files using text embeddings",
-  "author": "bbawj",
-  "authorUrl": "https://github.com/bbawj",
+  "description": "Hybrid semantic + lexical search with local or remote embeddings, REST API, and connections panel",
+  "author": "StepanchukYI",
+  "authorUrl": "https://github.com/StepanchukYI",
   "isDesktopOnly": true
 }

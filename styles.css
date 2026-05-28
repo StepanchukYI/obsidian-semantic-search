@@ -1,27 +1,12 @@
-/*
-
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
-
-If your plugin does not need CSS, delete this file.
-
-*/
+/* Search modal */
 .ss-suggestion-item:hover {
   background-color: var(--background-modifier-hover);
+  cursor: pointer;
 }
 
 .ss-query-submit-button {
   margin-right: 1rem;
   align-self: center;
-}
-
-.ss-estimate-container {
-  padding: 0.5em;
-}
-
-.ss-exists-text {
-  padding: 0.5em;
-  color: var(--text-error);
 }
 
 .ss-suggestion-header {
@@ -37,7 +22,190 @@ If your plugin does not need CSS, delete this file.
   font-family: var(--font-monospace);
 }
 
-.ss-suggestion-fallback {
+/* Search panel */
+.ss-panel-input-row {
+  display: flex;
+  gap: 0.4em;
+  padding: 0.5em;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.ss-panel-input {
+  flex: 1;
+  font-size: 0.9em;
+  padding: 0.3em 0.5em;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-modifier-form-field);
+  color: var(--text-normal);
+}
+
+.ss-panel-input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+.ss-panel-btn {
+  font-size: 0.85em;
+  padding: 0.3em 0.8em;
+  border-radius: 4px;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  cursor: pointer;
+  border: none;
+}
+
+.ss-panel-btn:hover {
+  background: var(--interactive-accent-hover);
+}
+
+.ss-panel-mode-row {
+  display: flex;
+  gap: 0.3em;
+  padding: 0.3em 0.5em;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.ss-mode-pill {
+  font-size: 0.8em;
+  padding: 0.15em 0.6em;
+  border-radius: 3px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.ss-mode-pill:hover {
+  background: var(--background-modifier-hover);
+}
+
+.ss-mode-pill.ss-mode-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.ss-panel-results {
+  overflow-y: auto;
+}
+
+.sem-search-placeholder,
+.sem-search-status,
+.sem-search-empty,
+.sem-search-error {
+  color: var(--text-muted);
+  padding: 0.5em;
+  font-size: 0.9em;
+}
+
+.sem-search-error {
   color: var(--text-error);
+}
+
+.sem-search-result {
+  padding: 0.5em 0.4em;
+  border-bottom: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+}
+
+.sem-search-result:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.sem-search-result-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4em;
+  margin-bottom: 0.15em;
+}
+
+.sem-search-result-link {
+  color: var(--text-accent);
+  text-decoration: none;
   font-weight: 500;
+  font-size: 0.9em;
+}
+
+.sem-search-result-score {
+  color: var(--text-muted);
+  font-size: 0.8em;
+  font-family: var(--font-monospace);
+}
+
+.sem-search-result-section {
+  color: var(--text-muted);
+  font-size: 0.8em;
+  font-style: italic;
+}
+
+.sem-search-result-path {
+  color: var(--text-faint);
+  font-size: 0.75em;
+  font-family: var(--font-monospace);
+}
+
+/* Filter bar */
+.ss-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.3em 0.5em;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.ss-filter-folder {
+  width: 120px;
+  font-size: 0.85em;
+  padding: 0.2em 0.4em;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 3px;
+  background: var(--background-modifier-form-field);
+  color: var(--text-normal);
+}
+
+/* Tag pills */
+.ss-tag-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3em;
+}
+
+.ss-tag-pill {
+  font-size: 0.75em;
+  padding: 0.15em 0.5em;
+  border-radius: 10px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.ss-tag-pill:hover {
+  background: var(--background-modifier-hover);
+}
+
+.ss-tag-pill.ss-tag-include {
+  background: #2d6a4f;
+  color: #d8f3dc;
+}
+
+.ss-tag-pill.ss-tag-exclude {
+  background: #9d0208;
+  color: #ffd6d6;
+}
+
+/* Result tags */
+.ss-result-tags {
+  display: flex;
+  gap: 0.25em;
+  margin-top: 0.1em;
+}
+
+.ss-result-tag {
+  font-size: 0.7em;
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
 }

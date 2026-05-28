@@ -1,188 +1,174 @@
-import { App, Editor, Modal, normalizePath, Notice, OpenViewState, PaneType, renderResults, SearchResult, setIcon, SplitDirection, TFile, WorkspaceLeaf } from "obsidian";
-import { semanticSearchSettings } from "src/settings/settings";
-import { Suggestion, WASMSuggestion } from "./suggestion";
-
-import * as plugin from "../../pkg/obsidian_rust_plugin.js";
+import { App, Modal } from 'obsidian';
+import { EmbeddingProvider } from '../providers/types';
+import { SearchEngine, SearchResult, SearchFilters } from '../search';
+import { VectorStorage } from '../storage';
 
 export class QueryModal extends Modal {
-  settings: semanticSearchSettings;
-  estimatedCost = 0;
-  timerId: number;
-  delay = 200;
+	private provider: EmbeddingProvider;
+	private searchEngine: SearchEngine;
+	private storage: VectorStorage;
+	private includeTags = new Set<string>();
+	private excludeTags = new Set<string>();
 
-  constructor(app: App, settings: semanticSearchSettings) {
-    super(app);
-    this.settings = settings;
-  }
+	constructor(app: App, provider: EmbeddingProvider, searchEngine: SearchEngine, storage: VectorStorage) {
+		super(app);
+		this.provider = provider;
+		this.searchEngine = searchEngine;
+		this.storage = storage;
+	}
 
-  onOpen(): void {
-      const contentEl = this.modalEl;
-      this.modalEl.removeClass("modal");
-      this.modalEl.addClass("prompt");
-      this.modalEl.querySelector(".modal-close-button")?.remove();
+	onOpen(): void {
+		const contentEl = this.modalEl;
+		contentEl.removeClass('modal');
+		contentEl.addClass('prompt');
+		contentEl.querySelector('.modal-close-button')?.remove();
 
-      const inputContainer = contentEl.createDiv({cls: "prompt-input-container"})
-      const input = inputContainer.createEl("input", {cls: "prompt-input"});
+		const inputContainer = contentEl.createDiv({ cls: 'prompt-input-container' });
+		const input = inputContainer.createEl('input', {
+			cls: 'prompt-input',
+			attr: { placeholder: 'Semantic search...' },
+		});
 
-      const estimate_container = contentEl.createDiv({cls: "prompt-instructions"});
-      const estimate_text = estimate_container.createDiv({cls: "prompt-instruction"});
-	  if (this.settings.costEstimation) {
-		  estimate_text.setText("Estimated cost of query: $0");
-		  input.addEventListener("input", (e) => {
-			  this.debounce(() => this.update_query_cost_estimate(e, estimate_text), this.delay);
-		  })
-	  } else {
-		  estimate_text.setText("Cost estimation is disabled");
-	  }
+		const button = inputContainer.createEl('button', {
+			text: 'Search',
+			cls: 'ss-query-submit-button',
+		});
 
-      const button = inputContainer.createEl("button", {text: "Submit", cls: "ss-query-submit-button"});
-      const resultsDiv = contentEl.createDiv({cls: "prompt-results"});
+		// Filter bar
+		const filterBar = contentEl.createDiv({ cls: 'ss-filter-bar' });
 
-      // Function to handle query submission
-      const submitQuery = async () => {
-        resultsDiv.replaceChildren();
-        setIcon(resultsDiv, "loader");
-        const suggestions: Suggestion[] = await this.getSuggestions(input.value);
-        resultsDiv.replaceChildren();
-        suggestions.forEach(suggestion => {
-          this.renderSuggestion(suggestion, resultsDiv);
-        })
-      };
+		const folderInput = filterBar.createEl('input', {
+			cls: 'ss-filter-folder',
+			attr: { placeholder: 'Folder filter...', type: 'text' },
+		});
 
-      // Add click handler for button
-      button.onclick = submitQuery;
+		// Tag pills
+		const tagContainer = filterBar.createDiv({ cls: 'ss-tag-pills' });
+		const allTags = this.storage.getAllTags();
 
-      // Add Enter key support
-      input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          submitQuery();
-        }
-      });
-  }
+		for (const tag of allTags) {
+			const pill = tagContainer.createSpan({ cls: 'ss-tag-pill', text: tag });
+			pill.onclick = () => this.toggleTag(tag, pill);
+			pill.oncontextmenu = (e) => {
+				e.preventDefault();
+				this.toggleExcludeTag(tag, pill);
+			};
+		}
 
-  update_query_cost_estimate(e: Event, estimate_text: HTMLElement) {
-    if (e.target) {
-      const input = e.target as HTMLInputElement;
-      this.estimatedCost = plugin.get_query_cost_estimate(input.value);
-    }
-    estimate_text.setText("Estimated cost of query: $" + this.estimatedCost);
-  }
+		const resultsDiv = contentEl.createDiv({ cls: 'prompt-results' });
 
-  debounce(fn: Function, delay_in_ms: number) {
-    clearTimeout(this.timerId);
-    this.timerId = setTimeout(fn, delay_in_ms);
-  }
+		const submitQuery = async () => {
+			const query = input.value.trim();
+			if (!query) return;
 
-  onClose() {
-    let { contentEl } = this;
-    contentEl.empty();
-  }
+			resultsDiv.empty();
+			resultsDiv.createEl('p', { text: 'Searching...', cls: 'sem-search-status' });
 
-  // Returns all available suggestions.
-  async getSuggestions(query: string): Promise<Suggestion[]> {
-    const wasmSuggestions: WASMSuggestion[] = await plugin.get_suggestions(this.app, this.settings, query);
-    console.debug("WASM suggestions received:", wasmSuggestions);
+			try {
+				if (!this.provider.isReady()) {
+					resultsDiv.empty();
+					resultsDiv.createEl('p', { text: 'Model not loaded yet...', cls: 'sem-search-error' });
+					return;
+				}
 
-    const suggestions: Suggestion[] = wasmSuggestions.map(wasmSuggestion => new Suggestion(this.app, wasmSuggestion, this.settings.sectionDelimeterRegex));
+				const filters: SearchFilters = {
+					pathPrefix: folderInput.value.trim() || undefined,
+					includeTags: this.includeTags.size > 0 ? Array.from(this.includeTags) : undefined,
+					excludeTags: this.excludeTags.size > 0 ? Array.from(this.excludeTags) : undefined,
+				};
 
-    // Wait for all suggestions to load their file and heading data
-    await Promise.all(suggestions.map(async suggestion => {
-      await suggestion.addSuggestionFile().addSuggestionHeading();
-    }));
+				const queryEmbedding = (await this.provider.embedQuery([query]))[0];
+				const results = this.searchEngine.hybridSearch(queryEmbedding, query, { limit: 15, filters });
+				resultsDiv.empty();
 
-    return suggestions;
-  }
+				if (results.length === 0) {
+					resultsDiv.createEl('p', { text: 'No results found', cls: 'sem-search-empty' });
+					return;
+				}
 
-  // Renders each suggestion item.
-  renderSuggestion(suggestion: Suggestion, el: HTMLElement) {
-    const resultContainer = el.createDiv({cls: ["suggestion-item", "ss-suggestion-item"]})
-    resultContainer.onclick = async () => await this.onChooseSuggestion(suggestion);
-	suggestion.renderIntoHTML(resultContainer);
-  }
+				for (const result of results) {
+					this.renderResult(resultsDiv, result);
+				}
+			} catch (err) {
+				resultsDiv.empty();
+				resultsDiv.createEl('p', { text: `Error: ${err}`, cls: 'sem-search-error' });
+			}
+		};
 
-  // Perform action on the selected suggestion.
-  async onChooseSuggestion(suggestion: Suggestion) {
-    this.close();
-    const isMatch = (candidateLeaf: WorkspaceLeaf) => {
-      let val = false;
+		button.onclick = submitQuery;
+		input.addEventListener('keydown', (e) => {
+			if (e.key === 'Enter') {
+				e.preventDefault();
+				submitQuery();
+			}
+		});
 
-      if (candidateLeaf?.view) {
-        val = candidateLeaf.view.file === suggestion.file;
-      }
+		input.focus();
+	}
 
-      return val;
-    };
-    const leaves: WorkspaceLeaf[] = [];
-    this.app.workspace.iterateAllLeaves(leaf => leaves.push(leaf));
-    const matchingLeaf = leaves.find(isMatch);
+	private toggleTag(tag: string, pill: HTMLSpanElement) {
+		if (this.includeTags.has(tag)) {
+			this.includeTags.delete(tag);
+			pill.removeClass('ss-tag-include');
+		} else {
+			this.includeTags.add(tag);
+			this.excludeTags.delete(tag);
+			pill.removeClass('ss-tag-exclude');
+			pill.addClass('ss-tag-include');
+		}
+	}
 
-    // Only set cursor position if we have valid position data
-    const eState: any = {
-      active: true,
-      focus: true,
-    };
+	private toggleExcludeTag(tag: string, pill: HTMLSpanElement) {
+		if (this.excludeTags.has(tag)) {
+			this.excludeTags.delete(tag);
+			pill.removeClass('ss-tag-exclude');
+		} else {
+			this.excludeTags.add(tag);
+			this.includeTags.delete(tag);
+			pill.removeClass('ss-tag-include');
+			pill.addClass('ss-tag-exclude');
+		}
+	}
 
-    // Add position data only if it exists and is valid
-    if (suggestion.pos?.start && suggestion.pos?.end) {
-      eState.startLoc = suggestion.pos.start;
-      eState.endLoc = suggestion.pos.end;
-      eState.cursor = {
-        from: {line: suggestion.pos.start.line, ch: suggestion.pos.start.col },
-        to: {line: suggestion.pos.start.line, ch: suggestion.pos.start.col },
-      };
-    }
+	private renderResult(container: HTMLElement, result: SearchResult) {
+		const item = container.createDiv({ cls: ['suggestion-item', 'ss-suggestion-item'] });
+		const name = result.path.split('/').pop()?.replace('.md', '') || result.path;
 
-    if (matchingLeaf === undefined) {
-      if (suggestion.file) {
-        await this.openFileInLeaf(suggestion.file, "tab", "vertical", {
-          active: true,
-          eState
-        })
-      }
-    } else {
-      this.app.workspace.setActiveLeaf(matchingLeaf, {focus: true});
-      matchingLeaf.view.setEphemeralState(eState);
-    }
-  }
+		const header = item.createDiv({ cls: 'ss-suggestion-header' });
+		header.createEl('span', { text: name });
+		header.createSpan({
+			text: ` ${result.score.toFixed(3)} (${result.source})`,
+			cls: 'sem-search-result-score',
+		});
 
-  async openFileInLeaf(file: TFile, navType: PaneType, splitDirection: SplitDirection = "vertical", openState: OpenViewState) {
-    const { workspace } = this.app;
-    const leaf = navType === "split" ? workspace.getLeaf(navType, splitDirection) : workspace.getLeaf(navType)
-    await leaf.openFile(file, openState);
-  }
-}
+		// Show tags for this result
+		const tags = this.storage.getTagsForPath(result.path);
+		if (tags.length > 0) {
+			const tagRow = item.createDiv({ cls: 'ss-result-tags' });
+			for (const t of tags.slice(0, 5)) {
+				tagRow.createSpan({ text: t, cls: 'ss-result-tag' });
+			}
+		}
 
-export class LinkSuggestQueryModal extends QueryModal {
-  editor: Editor;
+		if (result.section) {
+			item.createDiv({
+				text: `§ ${result.section}`,
+				cls: 'sem-search-result-section',
+			});
+		}
 
-  constructor(app: App, settings: semanticSearchSettings, editor: Editor) {
-    super(app, settings);
-    this.editor = editor;
-  }
+		item.createDiv({
+			text: result.path,
+			cls: 'ss-suggestion-path',
+		});
 
-  onOpen(): void {
-    const selection = this.editor.getSelection();
-    if (selection === "") {
-      new Notice("No selection found");
-      this.close();
-      return
-    }
+		item.onclick = () => {
+			this.close();
+			this.app.workspace.openLinkText(result.path, '');
+		};
+	}
 
-    super.onOpen();
-    const input: HTMLInputElement | null = this.modalEl.querySelector(".prompt-input");
-
-    if (input) {
-      input.value = this.editor.getSelection();
-      // trigger the input event which calculates estimated cost
-      input.dispatchEvent(new InputEvent("input"));
-    }
-  }
-
-  async onChooseSuggestion(suggestion: Suggestion) {
-    this.close();
-    const linkPath = normalizePath(encodeURI(suggestion.file?.path + "#" + suggestion.header));
-    const textToLink = this.editor.getSelection();
-    this.editor.replaceSelection(`[${textToLink}](${linkPath})`);
-  }
+	onClose() {
+		this.contentEl.empty();
+	}
 }

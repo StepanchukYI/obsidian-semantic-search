@@ -9,6 +9,8 @@
     "noImplicitAny": true,
     "moduleResolution": "node",
     "importHelpers": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
     "isolatedModules": true,
 	"strictNullChecks": true,
     "lib": [
