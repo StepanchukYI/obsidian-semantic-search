@@ -1,7 +1,7 @@
 {
   "name": "obsidian-semantic-search",
   "description": "Hybrid semantic + lexical search for Obsidian with configurable embedding providers and REST API",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
