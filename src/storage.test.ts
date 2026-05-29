@@ -2,7 +2,20 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import initSqlJs, { Database } from 'sql.js-fts5';
 import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
-import { hashContent } from './storage';
+import { hashContent, VectorStorage } from './storage';
+
+async function makeStorage(): Promise<VectorStorage> {
+	// in-memory adapter stub: exists()->false, readBinary/writeBinary/mkdir no-op
+	const adapter: any = {
+		exists: async () => false,
+		readBinary: async () => new ArrayBuffer(0),
+		writeBinary: async () => {},
+		mkdir: async () => {},
+	};
+	const s = new VectorStorage({ adapter } as any, '/tmp/x/search.db');
+	await s.init();
+	return s;
+}
 
 let wasmBinary: Buffer | undefined;
 function getWasmBinary(): Buffer {
@@ -359,5 +372,21 @@ describe('TestStorage (sql.js + FTS5)', () => {
 
 			db.close();
 		});
+	});
+});
+
+describe('frontmatter', () => {
+	it('persists and returns scalar frontmatter', async () => {
+		const s = await makeStorage();
+		s.upsert({
+			path: 'a.md', mtime: 1000, section: 'h', contentHash: 'x',
+			embedding: new Float32Array([1, 0, 0]), content: 'hello',
+			tags: ['#t'], frontmatter: { type: 'decision', importance: 4 },
+		});
+		const meta = s.getMetaForPath('a.md');
+		expect(meta.frontmatter).toEqual({ type: 'decision', importance: 4 });
+		expect(meta.mtime).toBe(1000);
+		expect(meta.tags).toEqual(['#t']);
+		s.close();
 	});
 });

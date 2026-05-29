@@ -56,6 +56,7 @@ export class VectorStorage {
 				content_hash TEXT NOT NULL,
 				embedding BLOB,
 				tags TEXT DEFAULT '[]',
+				frontmatter TEXT DEFAULT '{}',
 				updated_at INTEGER DEFAULT (strftime('%s', 'now'))
 			);
 		`);
@@ -68,18 +69,20 @@ export class VectorStorage {
 			);
 		`);
 		try { this.db.run("ALTER TABLE documents ADD COLUMN tags TEXT DEFAULT '[]'"); } catch {}
+		try { this.db.run("ALTER TABLE documents ADD COLUMN frontmatter TEXT DEFAULT '{}'"); } catch {}
 	}
 
-	upsert(entry: { path: string; mtime: number; section: string; contentHash: string; embedding: Float32Array | null; content?: string; tags?: string[] }) {
+	upsert(entry: { path: string; mtime: number; section: string; contentHash: string; embedding: Float32Array | null; content?: string; tags?: string[]; frontmatter?: Record<string, unknown> }) {
 		const emb = entry.embedding ? this.float32ToBlob(entry.embedding) : null;
 		const tagsJson = JSON.stringify(entry.tags ?? []);
+		const fmJson = JSON.stringify(entry.frontmatter ?? {});
 		this.db.run(
-			`INSERT INTO documents (path, mtime, section, content_hash, embedding, tags) VALUES (?, ?, ?, ?, ?, ?)
+			`INSERT INTO documents (path, mtime, section, content_hash, embedding, tags, frontmatter) VALUES (?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(path, section) DO UPDATE SET
 				mtime = excluded.mtime, content_hash = excluded.content_hash,
-				embedding = excluded.embedding, tags = excluded.tags,
+				embedding = excluded.embedding, tags = excluded.tags, frontmatter = excluded.frontmatter,
 				updated_at = strftime('%s', 'now')`,
-			[entry.path, entry.mtime, entry.section, entry.contentHash, emb, tagsJson]
+			[entry.path, entry.mtime, entry.section, entry.contentHash, emb, tagsJson, fmJson]
 		);
 
 		if (entry.content) {
@@ -141,6 +144,22 @@ export class VectorStorage {
 		return [];
 	}
 
+	getMetaForPath(filePath: string): { tags: string[]; frontmatter: Record<string, unknown>; mtime: number } {
+		const stmt = this.db.prepare('SELECT tags, frontmatter, mtime FROM documents WHERE path = ? LIMIT 1');
+		stmt.bind([filePath]);
+		if (stmt.step()) {
+			const row = stmt.getAsObject() as any;
+			stmt.free();
+			return {
+				tags: JSON.parse(row.tags || '[]'),
+				frontmatter: JSON.parse(row.frontmatter || '{}'),
+				mtime: (row.mtime as number) ?? 0,
+			};
+		}
+		stmt.free();
+		return { tags: [], frontmatter: {}, mtime: 0 };
+	}
+
 	clearAll() {
 		this.db.run('DELETE FROM documents');
 		this.db.run('DELETE FROM documents_fts');
@@ -170,9 +189,9 @@ export class VectorStorage {
 		return outdated;
 	}
 
-	getAllEmbeddings(): { id: number; path: string; section: string; embedding: Float32Array; tags: string[] }[] {
-		const stmt = this.db.prepare('SELECT id, path, section, embedding, tags FROM documents WHERE embedding IS NOT NULL');
-		const results: { id: number; path: string; section: string; embedding: Float32Array; tags: string[] }[] = [];
+	getAllEmbeddings(): { id: number; path: string; section: string; embedding: Float32Array; tags: string[]; mtime: number; frontmatter: Record<string, unknown> }[] {
+		const stmt = this.db.prepare('SELECT id, path, section, embedding, tags, mtime, frontmatter FROM documents WHERE embedding IS NOT NULL');
+		const results: { id: number; path: string; section: string; embedding: Float32Array; tags: string[]; mtime: number; frontmatter: Record<string, unknown> }[] = [];
 		while (stmt.step()) {
 			const row = stmt.getAsObject() as any;
 			results.push({
@@ -180,7 +199,9 @@ export class VectorStorage {
 				path: row.path as string,
 				section: row.section as string,
 				embedding: this.blobToFloat32(row.embedding as Uint8Array),
-					tags: JSON.parse((row.tags as string) || '[]'),
+				tags: JSON.parse((row.tags as string) || '[]'),
+				mtime: (row.mtime as number) ?? 0,
+				frontmatter: JSON.parse((row.frontmatter as string) || '{}'),
 			});
 		}
 		stmt.free();
