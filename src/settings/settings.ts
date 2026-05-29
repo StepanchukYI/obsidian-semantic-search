@@ -329,7 +329,7 @@ export class SemanticSearchSettingTab extends PluginSettingTab {
 		if (this.plugin.apiServer?.isRegistered()) {
 			new Setting(containerEl)
 				.setName('API routes active')
-				.setDesc('/semantic/health, /status, /search, /search/semantic, /search/lexical')
+				.setDesc('/semantic/health, /status, /search, /search/semantic, /search/lexical' + ((this.app as any).plugins?.enabledPlugins?.has?.('dataview') ? ', /dql' : ''))
 				.addButton(b => b.setButtonText('Unregister').setWarning().onClick(async () => {
 					this.plugin.apiServer?.unregister();
 					new Notice('API routes unregistered');

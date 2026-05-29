@@ -62,6 +62,32 @@ export class ApiServer {
 		return p;
 	}
 
+	private async runDql(dql: any, format: any, res: any) {
+		try {
+			const q = typeof dql === 'string' ? dql.trim() : '';
+			if (!q) {
+				res.status(400).json({ ok: false, error: 'Missing DQL query (param "q" or request body)' });
+				return;
+			}
+			const dv = (this.app as any).plugins?.plugins?.['dataview']?.api;
+			if (!dv) {
+				res.status(503).json({ ok: false, error: 'Dataview plugin not enabled' });
+				return;
+			}
+			if (format === 'json') {
+				const r = await dv.query(q);
+				if (!r.successful) { res.status(400).json({ ok: false, error: r.error }); return; }
+				res.json({ ok: true, data: r.value });
+				return;
+			}
+			const r = await dv.queryMarkdown(q);
+			if (!r.successful) { res.status(400).json({ ok: false, error: r.error }); return; }
+			res.type('text/markdown').send(r.value);
+		} catch (err: any) {
+			res.status(500).json({ ok: false, error: err.message });
+		}
+	}
+
 	async register(): Promise<void> {
 		if (this.registered) return;
 
@@ -181,6 +207,23 @@ export class ApiServer {
 					res.status(500).json({ ok: false, error: err.message });
 				}
 			});
+		// Dataview DQL passthrough — live query results for agents.
+		// Local REST API has no DQL endpoint; this runs the Dataview JS API directly.
+		// Only exposed when the Dataview plugin is enabled (route absent otherwise).
+		// GET /semantic/dql?q=<dql>  or  POST body (raw DQL text, or {"query": "..."}).
+		// Default returns rendered markdown; ?format=json returns structured rows.
+		if ((this.app as any).plugins?.enabledPlugins?.has?.('dataview')) {
+			(api.addRoute('/semantic/dql') as RouteHandler)
+				.get(async (req: any, res: any) => {
+					await this.runDql(req.query.q, req.query.format, res);
+				})
+				.post(async (req: any, res: any) => {
+					const body = req.body;
+					const dql = typeof body === 'string' ? body : body?.query;
+					await this.runDql(dql, req.query.format ?? body?.format, res);
+				});
+			console.log('[semantic-search] /semantic/dql route registered (Dataview enabled)');
+		}
 	}
 
 	isRegistered(): boolean {
