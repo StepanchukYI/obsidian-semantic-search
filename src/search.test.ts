@@ -423,4 +423,32 @@ describe('generic filters (eq/gte/date)', () => {
 		expect(paths).toContain('present-empty.md');
 		expect(paths).not.toContain('absent.md');
 	});
+
+	it('semantic result includes frontmatter', () => {
+		const rows: SeededRow[] = [
+			{ path: 'fm.md', section: '', embedding: [1,0,0], tags: [], frontmatter: { importance: 5 }, mtime: 1 },
+		];
+		const engine = seededEngine(rows);
+		const results = engine.semanticSearch([1,0,0], 10);
+		expect(results).toHaveLength(1);
+		expect(results[0].frontmatter).toEqual({ importance: 5 });
+	});
+
+	it('lexical result includes frontmatter', () => {
+		const rows: SeededRow[] = [
+			{ path: 'lex.md', section: '', embedding: [0,1,0], tags: [], frontmatter: { importance: 5 }, mtime: 1 },
+		];
+		const stubStorage: any = {
+			getAllEmbeddings: () => [],
+			lexicalSearch: () => rows.map(r => ({ id: 0, path: r.path, section: r.section, rank: -1 })),
+			getMetaForPath: (p: string) => {
+				const r = rows.find(x => x.path === p);
+				return r ? { tags: r.tags, frontmatter: r.frontmatter, mtime: r.mtime } : { tags: [], frontmatter: {}, mtime: 0 };
+			},
+		};
+		const engine = new RealSearchEngine(stubStorage);
+		const results = engine.lexicalSearch('keyword');
+		expect(results).toHaveLength(1);
+		expect(results[0].frontmatter).toEqual({ importance: 5 });
+	});
 });

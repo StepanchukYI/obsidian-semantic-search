@@ -5,6 +5,7 @@ export interface SearchResult {
 	section: string;
 	score: number;
 	source: 'semantic' | 'lexical' | 'hybrid';
+	frontmatter?: Record<string, unknown>;
 }
 
 export interface SearchFilters {
@@ -32,6 +33,7 @@ export class SearchEngine {
 			section: doc.section,
 			score: cosineSimilarity(queryEmbedding, doc.embedding),
 			source: 'semantic' as const,
+			frontmatter: doc.frontmatter,
 		}));
 		scored.sort((a, b) => b.score - a.score);
 		return this.dedupByFile(scored, limit);
@@ -40,15 +42,17 @@ export class SearchEngine {
 	lexicalSearch(query: string, filters?: SearchFilters, limit: number = 20): SearchResult[] {
 		const pathPrefix = filters?.pathPrefix;
 		const results = this.storage.lexicalSearch(query, pathPrefix, limit * 3);
-		const filtered = results.filter(r => {
+		const filtered = results.flatMap(r => {
 			const meta = this.storage.getMetaForPath(r.path);
-			return this.matchesTags(meta.tags, filters) && this.matchesFields(meta.frontmatter, meta.mtime, filters);
+			if (!this.matchesTags(meta.tags, filters) || !this.matchesFields(meta.frontmatter, meta.mtime, filters)) return [];
+			return [{ r, meta }];
 		});
-		const scored = filtered.map(r => ({
+		const scored = filtered.map(({ r, meta }) => ({
 			path: r.path,
 			section: r.section,
 			score: r.rank,
 			source: 'lexical' as const,
+			frontmatter: meta.frontmatter,
 		}));
 		return this.dedupByFile(scored, limit);
 	}
@@ -74,6 +78,7 @@ export class SearchEngine {
 			rankLex?: number;
 			semScore?: number;
 			pathMatch: boolean;
+			frontmatter?: Record<string, unknown>;
 		}>();
 
 		for (let i = 0; i < semRaw.length; i++) {
@@ -85,6 +90,7 @@ export class SearchEngine {
 				rankSem: i,
 				semScore: semRaw[i].score,
 				pathMatch: isMatch,
+				frontmatter: semRaw[i].frontmatter,
 			});
 		}
 
@@ -95,12 +101,14 @@ export class SearchEngine {
 			if (existing) {
 				existing.rankLex = i;
 				if (isMatch) existing.pathMatch = true;
+				if (!existing.frontmatter) existing.frontmatter = lexRaw[i].frontmatter;
 			} else {
 				candidates.set(key, {
 					path: lexRaw[i].path,
 					section: lexRaw[i].section,
 					rankLex: i,
 					pathMatch: isMatch,
+					frontmatter: lexRaw[i].frontmatter,
 				});
 			}
 		}
@@ -125,6 +133,7 @@ export class SearchEngine {
 				section: c.section,
 				score,
 				source: 'hybrid' as const,
+				frontmatter: c.frontmatter,
 			};
 		});
 
@@ -139,21 +148,24 @@ export class SearchEngine {
 			section: doc.section,
 			score: cosineSimilarity(queryEmbedding, doc.embedding),
 			source: 'semantic' as const,
+			frontmatter: doc.frontmatter,
 		})).sort((a, b) => b.score - a.score);
 	}
 
 	private rawLexical(query: string, filters?: SearchFilters): SearchResult[] {
 		const pathPrefix = filters?.pathPrefix;
 		const results = this.storage.lexicalSearch(query, pathPrefix, 60);
-		return results.filter(r => {
+		return results.flatMap(r => {
 			const meta = this.storage.getMetaForPath(r.path);
-			return this.matchesTags(meta.tags, filters) && this.matchesFields(meta.frontmatter, meta.mtime, filters);
-		}).map(r => ({
-			path: r.path,
-			section: r.section,
-			score: r.rank,
-			source: 'lexical' as const,
-		}));
+			if (!this.matchesTags(meta.tags, filters) || !this.matchesFields(meta.frontmatter, meta.mtime, filters)) return [];
+			return [{
+				path: r.path,
+				section: r.section,
+				score: r.rank,
+				source: 'lexical' as const,
+				frontmatter: meta.frontmatter,
+			}];
+		});
 	}
 
 	private applyFilters<T extends { path: string; section: string; tags: string[]; frontmatter: Record<string, unknown>; mtime: number }>(docs: T[], filters?: SearchFilters): T[] {

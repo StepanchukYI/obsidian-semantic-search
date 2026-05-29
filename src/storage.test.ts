@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import initSqlJs, { Database } from 'sql.js-fts5';
-import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, rmSync } from 'fs';
+import { readFileSync, existsSync, rmSync } from 'fs';
 import { join } from 'path';
 import { hashContent, VectorStorage } from './storage';
 
