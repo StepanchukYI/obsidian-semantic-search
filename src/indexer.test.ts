@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { extractScalarFrontmatter } from './indexer';
 
 // Extract splitSections logic from indexer for testing
 function splitSections(content: string): { heading: string; content: string }[] {
@@ -146,5 +147,13 @@ describe('isIgnored', () => {
 
 	it('exact folder match', () => {
 		expect(isIgnored('archive/old.md', ignored)).toBe(true);
+	});
+});
+
+describe('extractScalarFrontmatter', () => {
+	it('extracts scalar frontmatter, skips non-scalars except tags', () => {
+		const fm = { type: 'decision', importance: 4, draft: true, tags: ['x'], authors: ['a', 'b'], meta: { k: 1 } };
+		const out = extractScalarFrontmatter(fm);
+		expect(out).toEqual({ type: 'decision', importance: 4, draft: true });
 	});
 });

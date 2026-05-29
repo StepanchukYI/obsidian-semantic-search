@@ -2,6 +2,16 @@ import { App, TFile, Vault } from 'obsidian';
 import { EmbeddingProvider } from './providers/types';
 import { VectorStorage, hashContent } from './storage';
 
+export function extractScalarFrontmatter(fm: Record<string, any> | undefined | null): Record<string, string | number | boolean> {
+	const out: Record<string, string | number | boolean> = {};
+	if (!fm) return out;
+	for (const [k, v] of Object.entries(fm)) {
+		if (k === 'tags' || k === 'position') continue;
+		if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') out[k] = v;
+	}
+	return out;
+}
+
 interface IndexerConfig {
 	ignoredFolders: string[];
 	sectionDelimiter: string;
@@ -100,7 +110,7 @@ export class Indexer {
 	}
 
 	private async indexBatch(filePaths: string[], onProgress?: (msg: string) => void) {
-		const allSections: { path: string; section: string; content: string; hash: string; tags: string[] }[] = [];
+		const allSections: { path: string; section: string; content: string; hash: string; tags: string[]; frontmatter: Record<string, string | number | boolean> }[] = [];
 
 		for (const fp of filePaths) {
 			const file = this.vault.getAbstractFileByPath(fp);
@@ -109,11 +119,13 @@ export class Indexer {
 			this.storage.deleteByPath(fp);
 			const content = await this.vault.read(file);
 			const tags = this.extractTags(file);
+			const cache = this.app.metadataCache.getFileCache(file);
+			const frontmatter = extractScalarFrontmatter(cache?.frontmatter);
 			const sections = this.splitSections(content);
 
 			for (const sec of sections) {
 				const hash = hashContent(sec.content);
-				allSections.push({ path: fp, section: sec.heading, content: sec.content, hash, tags });
+				allSections.push({ path: fp, section: sec.heading, content: sec.content, hash, tags, frontmatter });
 			}
 		}
 
@@ -136,7 +148,8 @@ export class Indexer {
 				contentHash: s.hash,
 				embedding: emb,
 				content: s.content,
-					tags: s.tags,
+				tags: s.tags,
+				frontmatter: s.frontmatter,
 			});
 		}
 	}
