@@ -2,6 +2,33 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import initSqlJs, { Database } from 'sql.js-fts5';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { SearchEngine as RealSearchEngine } from './search';
+
+type SeededRow = { path: string; section: string; embedding: number[]; tags: string[]; frontmatter: Record<string, unknown>; mtime: number };
+
+function seededEngine(rows: SeededRow[]): RealSearchEngine {
+	const stubStorage: any = {
+		getAllEmbeddings: () => rows.map(r => ({
+			id: 0,
+			path: r.path,
+			section: r.section,
+			embedding: new Float32Array(r.embedding),
+			tags: r.tags,
+			frontmatter: r.frontmatter,
+			mtime: r.mtime,
+		})),
+		lexicalSearch: () => [],
+		getMetaForPath: (p: string) => {
+			const r = rows.find(x => x.path === p);
+			return r ? { tags: r.tags, frontmatter: r.frontmatter, mtime: r.mtime } : { tags: [], frontmatter: {}, mtime: 0 };
+		},
+		getTagsForPath: (p: string) => {
+			const r = rows.find(x => x.path === p);
+			return r ? r.tags : [];
+		},
+	};
+	return new RealSearchEngine(stubStorage);
+}
 
 let wasmBinary: Buffer | undefined;
 function getWasmBinary(): Buffer {
@@ -270,5 +297,158 @@ describe('SearchEngine', () => {
 			expect(emptyEngine.hybridSearch([1, 0], 'test')).toHaveLength(0);
 			emptyStorage.close();
 		});
+	});
+});
+
+describe('generic filters (eq/gte/date)', () => {
+	it('filters semantic results by eq + gte + date', () => {
+		const engine = seededEngine([
+			{ path: 'd.md', section: '', embedding: [1,0,0], tags: [], frontmatter: { type: 'decision', importance: 5 }, mtime: 2000 },
+			{ path: 'l.md', section: '', embedding: [1,0,0], tags: [], frontmatter: { type: 'lesson', importance: 2 }, mtime: 500 },
+		]);
+		const r = engine.semanticSearch([1,0,0], 10, { fieldEq: { type: 'decision' }, fieldGte: { importance: 4 }, dateFrom: 1000 });
+		expect(r.map(x => x.path)).toEqual(['d.md']);
+	});
+
+	it('lexicalSearch: fieldEq filter excludes non-matching doc via getMetaForPath', async () => {
+		// seededEngine stubs getMetaForPath with full frontmatter, but the lexical path in
+		// RealSearchEngine calls storage.lexicalSearch + storage.getMetaForPath.
+		// Build an engine where lexicalSearch returns both docs but only one matches fieldEq.
+		const rows: SeededRow[] = [
+			{ path: 'match.md', section: '', embedding: [1,0], tags: [], frontmatter: { status: 'active' }, mtime: 1000 },
+			{ path: 'skip.md',  section: '', embedding: [0,1], tags: [], frontmatter: { status: 'draft'  }, mtime: 1000 },
+		];
+		const stubStorage: any = {
+			getAllEmbeddings: () => [],
+			// lexicalSearch returns both documents as if both matched the keyword
+			lexicalSearch: (_q: string, _prefix: string | undefined, _limit: number) =>
+				rows.map(r => ({ id: 0, path: r.path, section: r.section, rank: -1 })),
+			getMetaForPath: (p: string) => {
+				const r = rows.find(x => x.path === p);
+				return r ? { tags: r.tags, frontmatter: r.frontmatter, mtime: r.mtime } : { tags: [], frontmatter: {}, mtime: 0 };
+			},
+		};
+		const engine = new RealSearchEngine(stubStorage);
+		const results = engine.lexicalSearch('keyword', { fieldEq: { status: 'active' } });
+		const paths = results.map(r => r.path);
+		expect(paths).toContain('match.md');
+		expect(paths).not.toContain('skip.md');
+	});
+
+	it('lexicalSearch: fieldGte filter excludes non-matching doc via getMetaForPath', () => {
+		const rows: SeededRow[] = [
+			{ path: 'high.md', section: '', embedding: [1,0], tags: [], frontmatter: { priority: 8 }, mtime: 1000 },
+			{ path: 'low.md',  section: '', embedding: [0,1], tags: [], frontmatter: { priority: 2 }, mtime: 1000 },
+		];
+		const stubStorage: any = {
+			getAllEmbeddings: () => [],
+			lexicalSearch: () => rows.map(r => ({ id: 0, path: r.path, section: r.section, rank: -1 })),
+			getMetaForPath: (p: string) => {
+				const r = rows.find(x => x.path === p);
+				return r ? { tags: r.tags, frontmatter: r.frontmatter, mtime: r.mtime } : { tags: [], frontmatter: {}, mtime: 0 };
+			},
+		};
+		const engine = new RealSearchEngine(stubStorage);
+		const results = engine.lexicalSearch('keyword', { fieldGte: { priority: 5 } });
+		const paths = results.map(r => r.path);
+		expect(paths).toContain('high.md');
+		expect(paths).not.toContain('low.md');
+	});
+
+	it('hybridSearch: filters apply — doc failing fieldEq does not appear', () => {
+		const rows: SeededRow[] = [
+			{ path: 'pass.md', section: '', embedding: [1,0], tags: [], frontmatter: { kind: 'note' }, mtime: 1000 },
+			{ path: 'fail.md', section: '', embedding: [0,1], tags: [], frontmatter: { kind: 'task' }, mtime: 1000 },
+		];
+		const engine = seededEngine(rows);
+		const results = engine.hybridSearch([1,0], 'query', { filters: { fieldEq: { kind: 'note' } } });
+		const paths = results.map(r => r.path);
+		expect(paths).toContain('pass.md');
+		expect(paths).not.toContain('fail.md');
+	});
+
+	it('dateTo end-of-day: doc with mtime later same day as `to` is included', () => {
+		// `to` date is 2024-01-15 → dateTo = Date.parse('2024-01-15') + 86_399_000
+		const toDate = '2024-01-15';
+		const baseMs = Date.parse(toDate); // start of day UTC
+		const dateTo = baseMs + 86_399_000; // end-of-day inclusive
+		const sameDayLate = baseMs + 50_000_000; // well within the same day (later)
+		const nextDay = baseMs + 86_400_000 + 1000; // clearly next day
+
+		const rows: SeededRow[] = [
+			{ path: 'in.md',  section: '', embedding: [1,0], tags: [], frontmatter: {}, mtime: sameDayLate },
+			{ path: 'out.md', section: '', embedding: [1,0], tags: [], frontmatter: {}, mtime: nextDay },
+		];
+		const engine = seededEngine(rows);
+		const results = engine.semanticSearch([1,0], 10, { dateTo });
+		const paths = results.map(r => r.path);
+		expect(paths).toContain('in.md');
+		expect(paths).not.toContain('out.md');
+	});
+
+	it('dateTo: doc mtime exactly at dateTo boundary is included', () => {
+		const dateTo = 1_700_000_000_000; // arbitrary epoch ms
+		const rows: SeededRow[] = [
+			{ path: 'exact.md', section: '', embedding: [1,0], tags: [], frontmatter: {}, mtime: dateTo },
+			{ path: 'over.md',  section: '', embedding: [1,0], tags: [], frontmatter: {}, mtime: dateTo + 1 },
+		];
+		const engine = seededEngine(rows);
+		const results = engine.semanticSearch([1,0], 10, { dateTo });
+		const paths = results.map(r => r.path);
+		expect(paths).toContain('exact.md');
+		expect(paths).not.toContain('over.md');
+	});
+
+	it('eq=missingField:x excludes a doc that lacks that frontmatter key', () => {
+		const rows: SeededRow[] = [
+			{ path: 'has-field.md',     section: '', embedding: [1,0], tags: [], frontmatter: { category: 'tech' }, mtime: 1 },
+			{ path: 'missing-field.md', section: '', embedding: [1,0], tags: [], frontmatter: {},                   mtime: 1 },
+		];
+		const engine = seededEngine(rows);
+		const results = engine.semanticSearch([1,0], 10, { fieldEq: { category: 'tech' } });
+		const paths = results.map(r => r.path);
+		expect(paths).toContain('has-field.md');
+		expect(paths).not.toContain('missing-field.md');
+	});
+
+	it('eq=missingField: (empty string value) also excludes doc lacking that key', () => {
+		// A doc with the field set to '' should match eq=field:, but a doc lacking the field entirely must not.
+		const rows: SeededRow[] = [
+			{ path: 'present-empty.md', section: '', embedding: [1,0], tags: [], frontmatter: { notes: '' }, mtime: 1 },
+			{ path: 'absent.md',        section: '', embedding: [1,0], tags: [], frontmatter: {},            mtime: 1 },
+		];
+		const engine = seededEngine(rows);
+		const results = engine.semanticSearch([1,0], 10, { fieldEq: { notes: '' } });
+		const paths = results.map(r => r.path);
+		expect(paths).toContain('present-empty.md');
+		expect(paths).not.toContain('absent.md');
+	});
+
+	it('semantic result includes frontmatter', () => {
+		const rows: SeededRow[] = [
+			{ path: 'fm.md', section: '', embedding: [1,0,0], tags: [], frontmatter: { importance: 5 }, mtime: 1 },
+		];
+		const engine = seededEngine(rows);
+		const results = engine.semanticSearch([1,0,0], 10);
+		expect(results).toHaveLength(1);
+		expect(results[0].frontmatter).toEqual({ importance: 5 });
+	});
+
+	it('lexical result includes frontmatter', () => {
+		const rows: SeededRow[] = [
+			{ path: 'lex.md', section: '', embedding: [0,1,0], tags: [], frontmatter: { importance: 5 }, mtime: 1 },
+		];
+		const stubStorage: any = {
+			getAllEmbeddings: () => [],
+			lexicalSearch: () => rows.map(r => ({ id: 0, path: r.path, section: r.section, rank: -1 })),
+			getMetaForPath: (p: string) => {
+				const r = rows.find(x => x.path === p);
+				return r ? { tags: r.tags, frontmatter: r.frontmatter, mtime: r.mtime } : { tags: [], frontmatter: {}, mtime: 0 };
+			},
+		};
+		const engine = new RealSearchEngine(stubStorage);
+		const results = engine.lexicalSearch('keyword');
+		expect(results).toHaveLength(1);
+		expect(results[0].frontmatter).toEqual({ importance: 5 });
 	});
 });

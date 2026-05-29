@@ -1,8 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import initSqlJs, { Database } from 'sql.js-fts5';
-import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, rmSync } from 'fs';
+import { readFileSync, existsSync, rmSync } from 'fs';
 import { join } from 'path';
-import { hashContent } from './storage';
+import { hashContent, VectorStorage } from './storage';
+
+async function makeStorage(): Promise<VectorStorage> {
+	// in-memory adapter stub: exists()->false, readBinary/writeBinary/mkdir no-op
+	const adapter: any = {
+		exists: async () => false,
+		readBinary: async () => new ArrayBuffer(0),
+		writeBinary: async () => {},
+		mkdir: async () => {},
+	};
+	const s = new VectorStorage({ adapter } as any, '/tmp/x/search.db');
+	await s.init();
+	return s;
+}
 
 let wasmBinary: Buffer | undefined;
 function getWasmBinary(): Buffer {
@@ -359,5 +372,57 @@ describe('TestStorage (sql.js + FTS5)', () => {
 
 			db.close();
 		});
+	});
+});
+
+describe('frontmatter', () => {
+	it('persists and returns scalar frontmatter', async () => {
+		const s = await makeStorage();
+		s.upsert({
+			path: 'a.md', mtime: 1000, section: 'h', contentHash: 'x',
+			embedding: new Float32Array([1, 0, 0]), content: 'hello',
+			tags: ['#t'], frontmatter: { type: 'decision', importance: 4 },
+		});
+		const meta = s.getMetaForPath('a.md');
+		expect(meta.frontmatter).toEqual({ type: 'decision', importance: 4 });
+		expect(meta.mtime).toBe(1000);
+		expect(meta.tags).toEqual(['#t']);
+		s.close();
+	});
+
+	it('getAllEmbeddings returns frontmatter and mtime on each row', async () => {
+		const s = await makeStorage();
+		s.upsert({
+			path: 'b.md', mtime: 9999, section: '', contentHash: 'y',
+			embedding: new Float32Array([0, 1, 0]), content: 'world',
+			tags: ['#x'], frontmatter: { author: 'alice', score: 7 },
+		});
+		const rows = s.getAllEmbeddings();
+		expect(rows).toHaveLength(1);
+		const row = rows[0];
+		expect(row.mtime).toBe(9999);
+		expect(row.frontmatter).toEqual({ author: 'alice', score: 7 });
+		s.close();
+	});
+
+	it('init (initSchema) is idempotent — calling it twice does not throw', async () => {
+		// makeStorage already calls init() once. Calling init() again must be a no-op and not throw.
+		const s = await makeStorage();
+		await expect(s.init()).resolves.toBeUndefined();
+		s.close();
+	});
+
+	it('initSchema via double init leaves data intact', async () => {
+		const s = await makeStorage();
+		s.upsert({
+			path: 'c.md', mtime: 500, section: '', contentHash: 'z',
+			embedding: new Float32Array([1, 1, 0]),
+			tags: [], frontmatter: { x: 1 },
+		});
+		// Second init — must not throw and must not wipe the data
+		await s.init();
+		const meta = s.getMetaForPath('c.md');
+		expect(meta.mtime).toBe(500);
+		s.close();
 	});
 });
