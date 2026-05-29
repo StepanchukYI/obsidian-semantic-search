@@ -168,7 +168,8 @@ export class SearchEngine {
 	private matchesFields(frontmatter: Record<string, unknown>, mtime: number, f?: SearchFilters): boolean {
 		if (!f) return true;
 		if (f.fieldEq) for (const [k, v] of Object.entries(f.fieldEq)) {
-			if (String(frontmatter[k] ?? '') !== String(v)) return false;
+			if (!(k in frontmatter)) return false;
+			if (String(frontmatter[k]) !== String(v)) return false;
 		}
 		if (f.fieldGte) for (const [k, v] of Object.entries(f.fieldGte)) {
 			const n = Number(frontmatter[k]); if (!(Number.isFinite(n) && n >= v)) return false;

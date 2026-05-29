@@ -23,10 +23,10 @@ function parseFilters(req: any): SearchFilters {
 		excludeTags: req.query.excludeTags ? String(req.query.excludeTags).split(',').map(t => t.startsWith('#') ? t : '#' + t) : undefined,
 	};
 	const eq: Record<string, string> = {};
-	for (const item of parseList(req.query.eq)) { const i = item.indexOf(':'); if (i > 0) eq[item.slice(0, i)] = item.slice(i + 1); }
+	for (const item of parseList(req.query.eq)) { const s = String(item); const i = s.indexOf(':'); if (i > 0) eq[s.slice(0, i)] = s.slice(i + 1); }
 	if (Object.keys(eq).length) f.fieldEq = eq;
 	const gte: Record<string, number> = {};
-	for (const item of parseList(req.query.gte)) { const i = item.indexOf(':'); if (i > 0) { const n = Number(item.slice(i + 1)); if (Number.isFinite(n)) gte[item.slice(0, i)] = n; } }
+	for (const item of parseList(req.query.gte)) { const s = String(item); const i = s.indexOf(':'); if (i > 0) { const n = Number(s.slice(i + 1)); if (Number.isFinite(n)) gte[s.slice(0, i)] = n; } }
 	if (Object.keys(gte).length) f.fieldGte = gte;
 	if (req.query.from) { const d = Date.parse(String(req.query.from)); if (!Number.isNaN(d)) f.dateFrom = d; }
 	if (req.query.to) { const d = Date.parse(String(req.query.to)); if (!Number.isNaN(d)) f.dateTo = d + 86_399_000; } // end-of-day inclusive
