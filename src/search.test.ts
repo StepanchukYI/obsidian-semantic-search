@@ -2,6 +2,33 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import initSqlJs, { Database } from 'sql.js-fts5';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { SearchEngine as RealSearchEngine } from './search';
+
+type SeededRow = { path: string; section: string; embedding: number[]; tags: string[]; frontmatter: Record<string, unknown>; mtime: number };
+
+function seededEngine(rows: SeededRow[]): RealSearchEngine {
+	const stubStorage: any = {
+		getAllEmbeddings: () => rows.map(r => ({
+			id: 0,
+			path: r.path,
+			section: r.section,
+			embedding: new Float32Array(r.embedding),
+			tags: r.tags,
+			frontmatter: r.frontmatter,
+			mtime: r.mtime,
+		})),
+		lexicalSearch: () => [],
+		getMetaForPath: (p: string) => {
+			const r = rows.find(x => x.path === p);
+			return r ? { tags: r.tags, frontmatter: r.frontmatter, mtime: r.mtime } : { tags: [], frontmatter: {}, mtime: 0 };
+		},
+		getTagsForPath: (p: string) => {
+			const r = rows.find(x => x.path === p);
+			return r ? r.tags : [];
+		},
+	};
+	return new RealSearchEngine(stubStorage);
+}
 
 let wasmBinary: Buffer | undefined;
 function getWasmBinary(): Buffer {
@@ -270,5 +297,16 @@ describe('SearchEngine', () => {
 			expect(emptyEngine.hybridSearch([1, 0], 'test')).toHaveLength(0);
 			emptyStorage.close();
 		});
+	});
+});
+
+describe('generic filters (eq/gte/date)', () => {
+	it('filters semantic results by eq + gte + date', () => {
+		const engine = seededEngine([
+			{ path: 'd.md', section: '', embedding: [1,0,0], tags: [], frontmatter: { type: 'decision', importance: 5 }, mtime: 2000 },
+			{ path: 'l.md', section: '', embedding: [1,0,0], tags: [], frontmatter: { type: 'lesson', importance: 2 }, mtime: 500 },
+		]);
+		const r = engine.semanticSearch([1,0,0], 10, { fieldEq: { type: 'decision' }, fieldGte: { importance: 4 }, dateFrom: 1000 });
+		expect(r.map(x => x.path)).toEqual(['d.md']);
 	});
 });

@@ -11,6 +11,10 @@ export interface SearchFilters {
 	pathPrefix?: string;
 	includeTags?: string[];
 	excludeTags?: string[];
+	fieldEq?: Record<string, string>;
+	fieldGte?: Record<string, number>;
+	dateFrom?: number; // epoch ms inclusive
+	dateTo?: number;   // epoch ms inclusive
 }
 
 export class SearchEngine {
@@ -37,8 +41,8 @@ export class SearchEngine {
 		const pathPrefix = filters?.pathPrefix;
 		const results = this.storage.lexicalSearch(query, pathPrefix, limit * 3);
 		const filtered = results.filter(r => {
-			const tags = this.storage.getTagsForPath(r.path);
-			return this.matchesTags(tags, filters);
+			const meta = this.storage.getMetaForPath(r.path);
+			return this.matchesTags(meta.tags, filters) && this.matchesFields(meta.frontmatter, meta.mtime, filters);
 		});
 		const scored = filtered.map(r => ({
 			path: r.path,
@@ -142,8 +146,8 @@ export class SearchEngine {
 		const pathPrefix = filters?.pathPrefix;
 		const results = this.storage.lexicalSearch(query, pathPrefix, 60);
 		return results.filter(r => {
-			const tags = this.storage.getTagsForPath(r.path);
-			return this.matchesTags(tags, filters);
+			const meta = this.storage.getMetaForPath(r.path);
+			return this.matchesTags(meta.tags, filters) && this.matchesFields(meta.frontmatter, meta.mtime, filters);
 		}).map(r => ({
 			path: r.path,
 			section: r.section,
@@ -152,12 +156,26 @@ export class SearchEngine {
 		}));
 	}
 
-	private applyFilters<T extends { path: string; section: string; tags: string[] }>(docs: T[], filters?: SearchFilters): T[] {
+	private applyFilters<T extends { path: string; section: string; tags: string[]; frontmatter: Record<string, unknown>; mtime: number }>(docs: T[], filters?: SearchFilters): T[] {
 		if (!filters) return docs;
 		return docs.filter(d => {
 			if (filters.pathPrefix && !d.path.startsWith(filters.pathPrefix)) return false;
-			return this.matchesTags(d.tags, filters);
+			if (!this.matchesTags(d.tags, filters)) return false;
+			return this.matchesFields(d.frontmatter, d.mtime, filters);
 		});
+	}
+
+	private matchesFields(frontmatter: Record<string, unknown>, mtime: number, f?: SearchFilters): boolean {
+		if (!f) return true;
+		if (f.fieldEq) for (const [k, v] of Object.entries(f.fieldEq)) {
+			if (String(frontmatter[k] ?? '') !== String(v)) return false;
+		}
+		if (f.fieldGte) for (const [k, v] of Object.entries(f.fieldGte)) {
+			const n = Number(frontmatter[k]); if (!(Number.isFinite(n) && n >= v)) return false;
+		}
+		if (f.dateFrom !== undefined && mtime < f.dateFrom) return false;
+		if (f.dateTo !== undefined && mtime > f.dateTo) return false;
+		return true;
 	}
 
 	private dedupByFile(results: SearchResult[], limit: number): SearchResult[] {
